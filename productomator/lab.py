@@ -20,12 +20,17 @@ class Reporter(object):
                  name, 
                  # log_folder = '/export/htelg/tmp/'
                  log_folder = '/home/grad/htelg/.processlogs/',
+                 verbose = True, 
                  reporting_frequency = (1,'h'),
                  ):
         self.path2log = _pl.Path(log_folder).joinpath(f'{name}.log')
         self.reset()
         self.name = name
         self.reporting_frequency = _pd.to_timedelta(*reporting_frequency)
+        self.verbose = verbose
+        self.starttime = _pd.Timestamp.now()
+        if verbose:
+            print(f'start time: {self.starttime}')
     
     def reset(self):
         self._clean = 0
@@ -207,6 +212,27 @@ class Reporter(object):
         s = _smtplib.SMTP(smtp)
         s.send_message(self.parse_email())
         s.quit()
+        
+    def wrapup(self):
+        """
+        Sends out the last log and prints some info. Note processing results
+        (clean, warning, errors) might not be the total number of process, but 
+        the numbers since the last reset, which usually happens during a log.
+
+        Returns
+        -------
+        None.
+
+        """
+        if self.verbose:
+            print(f'number of cleanes: {self.clean}')
+            print(f'number of errors: {self.errors}')
+            print(f'number of warnings: {self.warnings}')
+            endtime = _pd.Timestamp.now()
+            print(f'time finished: {endtime}')
+            duration = (endtime - self.starttime) / _pd.to_timedelta(1, 'h')
+            print(f'total processing time: {duration} hours')
+        self.log(reset_counters = False, overwrite_reporting_frequency = True)
     
 
 class Automation(object):
