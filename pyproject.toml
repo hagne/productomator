@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=46.4.0", "wheel", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "productomator"
+authors = [{ name = "Hagen Telg", email = "hagen.telg@gmail.com" }]
+description = "Library that unifies the reporting in data production processes."
+license = { file = "LICENSE" }
+dynamic = ["version"]
+
+
+[project.urls]
+Documentation = "https://github.com/hagne/productomator"  # or your documentation URL
+Repository = "https://github.com/hagne/productomator"
+
+
+[tool.setuptools]
+packages = ["productomator"]
+
+[tool.setuptools_scm]
+write_to = "_version.py"  # Path to write the version file
+
+#[project.scripts]
+#ceilometerproduction = "ceilopy.products.production:run"
