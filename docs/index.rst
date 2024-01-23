@@ -11,6 +11,7 @@ Welcome to productomator's documentation!
    :caption: Contents:
 
    notebooks/getting_started.ipynb
+   notebooks/production_status.ipynb
 
 
 Indices and tables
