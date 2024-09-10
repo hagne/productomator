@@ -10,7 +10,8 @@ import pathlib as pl
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import plt_tools
+# import plt_tools
+import atmPy.tools.plt_tool_kit as plt_tools
 
 def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
               nodays = 9, verbose = False):
