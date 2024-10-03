@@ -46,6 +46,7 @@ def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
             continue
         df.loc[idx_last:df.index[-1],'no_data'] = df.loc[:,['error', 'success', 'warning']].max().max()/2
         # break
+        df['timedelta'] = (pd.Timestamp.now() - df.index) / pd.to_timedelta(1,'d')
         products[p2f.name] = df
     return Status(products, out_of_date)
 
@@ -53,13 +54,77 @@ class Status(object):
     def __init__(self, log, out_of_date):
         self.log = log
         self.out_of_date = out_of_date
-        
-    def plot(self):
+
+    def plot_time_delta(self):
         products = self.log
         f,aa = plt.subplots(len(products), sharex= True, gridspec_kw={'hspace': 0})
         
         prodlist = list(products.keys())
-        prodlist.sort(key=lambda x: products[x].success.replace(0, np.nan).dropna().index[-1],
+        prodlist.sort(key=lambda x: products[x].sort_index(ascending=False).success.replace(0, np.nan).dropna().index[0],
+                      reverse=False)
+        for e, prod in enumerate(prodlist):
+            a = aa[e]
+            df = products[prod]
+            assert(df.success.sum()>0), 'no data!!!'
+            df.sort_index(ascending=False, inplace=True)
+            x = df['timedelta']
+            
+            a.plot(x, df.success, color = 'green', marker = '.', label = 'success')
+            a.plot(x, df.warning, marker = '.', label = 'warning')
+            a.plot(x, df.error, marker = '.', label = 'error')
+    
+            bbox = dict(boxstyle = 'round', fc = [1,1,1,0.7])
+            # txt = f'{df.iloc[0].subprocess}\n{df.iloc[0].server}'
+            txt = f"{prod.replace('.log','')}\n{df.iloc[1].server.replace('.cmdl.noaa.gov','')}"
+            a.text(0.95, 0.5, txt, transform = a.transAxes, va = 'center', ha = 'right', bbox = bbox)
+            a.plot(x, df.no_data, color = 'red', lw = 10)
+            g = a.get_lines()[-1]
+            g.set_solid_capstyle('butt')
+            
+        # for e,a in enumerate(aa):
+            now = pd.Timestamp.now()
+            if e == 0:
+                text = f'{now.hour:02d}:{now.minute:02d}'
+            else:
+                text = None
+            
+            ty = df.loc[:,['error', 'success', 'warning']].max().max() *1.2
+            # plt_tools.markers.add_position_of_interest2axes(a, x = now, 
+            #                                                 text = text,
+            #                                                 text_pos = (now, ty),
+            #                                                 kwargs=dict(ls = '--', color = 'black'))
+            # plt_tools.markers.add_position_of_interest2axes(a, x = pd.Timestamp.now().date(), 
+            #                                                 kwargs=dict(ls = '--', color = 'black'))
+            for i in [1,2,3,7,14,30, 60]: 
+                if e == 0:
+                    text = f'{i}'
+                else:
+                    text = None
+                # x = pd.Timestamp.now().date() - pd.to_timedelta(i,'d')
+                plt_tools.markers.add_position_of_interest2axes(a, x = i, 
+                                                                text = text, 
+                                                                text_pos=(i,ty),
+                                                                kwargs=dict(ls = '--', color = 'black'))
+        leg = aa[-1].legend(loc = (1, 0),
+                          bbox_to_anchor=[1.01, 0],
+                          )
+        # leg.set_bbox_to_anchor([0.5,0.5])
+        for a in aa:
+            a.set_xscale('log')
+            a.set_xlim(left = 0.2)
+            
+        a = aa[-1]
+        a.set_xlabel('days')
+        # f.tight_layout()
+        # f.autofmt_xdate()
+        return f,aa,leg#, tp_t
+    
+    def plot_time(self):
+        products = self.log
+        f,aa = plt.subplots(len(products), sharex= True, gridspec_kw={'hspace': 0})
+        
+        prodlist = list(products.keys())
+        prodlist.sort(key=lambda x: products[x].success.replace(0, np.nan).dropna().index[0],
                       reverse=False)
         for e, prod in enumerate(prodlist):
             a = aa[e]
