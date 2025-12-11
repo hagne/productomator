@@ -8,16 +8,49 @@ class Workplanner():
                  p2fld_out,
                  date_from_name,
                  output_file_format, #lalalal_{date}.nc'
+                 glob_pattern = '*.nc',
                  **kwargs,
                 ):
         """
-        date_from_name = lambda name: name.split('.')[-2].split('_')[-1]
-        output_file_format = f'{site}_specflux_{{date}}.nc'
+        A generic workplanner class that can be used to plan and execute data processing tasks.
+        Parameters
+        ----------
+        p2fld_in : str or pathlib.Path
+            Path to the input folder containing data files to be processed.
+        p2fld_out : str or pathlib.Path
+            Path to the output folder where processed files will be saved.
+        date_from_name : function
+            A function that extracts a date from a filename. Example: lambda name: name.split('.')[-2].split('_')[-1]
+        output_file_format : str
+            A format string for naming output files, with a placeholder for the date. Example: f'{site}_specflux_{{date}}.nc'
+        glob_pattern : str, optional
+            A glob pattern to match input files. Default is '*.nc'.
+
+        Examples
+        --------
+        You will likely want to subclass this class and overwrite the process_row method, for example:
+
+        class CalibrateMFR(pm.worker.Workplanner):
+            def __init__(self,instrument,*args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.instrument = instrument
+                
+            def process_row(self, row = None, iloc = None, loc = None):
+                if iloc is not None:
+                    row = self.workplan.iloc[iloc]
+                elif loc is not None:
+                    row = self.workplan.loc[loc]
+                self.tp_row = row
+                ds = self.instrument.raw2calibrated(row.p2f_in)
+                return ds
         """
+
+
         self.output_file_format = output_file_format 
         self.p2fld_in = pl.Path(p2fld_in)
         self.p2fld_out = pl.Path(p2fld_out)
         self.date_from_name = date_from_name
+        self.glob_pattern = glob_pattern
         
         self._masterplan = None    
 
@@ -30,7 +63,7 @@ class Workplanner():
             self.p2fld_out.mkdir(parents=True, exist_ok=True)
             
             # all available MFRSR files
-            df1 = pd.DataFrame(self.p2fld_in.glob('*'), columns= ['p2f_in',])
+            df1 = pd.DataFrame(self.p2fld_in.glob(self.glob_pattern), columns= ['p2f_in',])
             df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
             df1.sort_index(inplace=True)
             
