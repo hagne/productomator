@@ -17,7 +17,7 @@ import socket
 
 class Reporter(object):
     def __init__(self, 
-                 name, 
+                 name = None, 
                  # log_folder = '/export/htelg/tmp/'
                  log_folder = '/home/grad/htelg/.processlogs/',
                  verbose = True, 
