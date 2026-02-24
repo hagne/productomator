@@ -1,4 +1,5 @@
 import pathlib as pl
+import socket
 import pandas as pd
 import xarray as xr
 import productomator.lab as prodlab
@@ -178,12 +179,33 @@ class Workplanner():
             row = self.workplan.loc[loc]
         self.tp_row = row
 
+        #####
+        # get last processed instance - usefull if processing depends on the previous day
+        ######
+        lastrow = self.get_last_row_before_workplan()
+        if isinstance(lastrow, type(None)):
+            assert(False), 'set defaults?'
+        dslast = xr.open_dataset(lastrow.p2f_out)
+
         #######
         ## Open input files
         #######
         ds = xr.open_dataset(row.p2f_in)
 
         ## Do some processing here, e.g. add attributes, format the dataset, etc.
+
+        #########
+        # Format the dataset attributes
+        #########
+        dropattrs = [
+                    # '','','','','',
+                    ]
+        for a in dropattrs:
+            ds.attrs.pop(a)
+
+        ds.attrs['input_files'] = row.p2f_in
+        ds.attrs['processing_date'] = pd.Timestamp.now().isoformat()
+        ds.attrs['processing_server'] = socket.gethostname()
 
         ## Save the output file
         ds.to_netcdf(row.p2f_out)
@@ -203,6 +225,19 @@ class Workplanner():
                 continue
             
             print('.', end = '')
+
+    def get_last_row_before_workplan(self):
+        try:
+            idx = self.workplan.iloc[0].name
+        except IndexError:
+            print('workplan is empty')
+            return None
+            
+        loc = self.masterplan.index.get_loc(idx) - 1
+        if loc < 0:
+            print('Masterplan and Workplan are identical. Either this is the first time the script is run with this configuration or the start data needs to be adjusted')
+            return None
+        return self.masterplan.iloc[loc]
 
 
 class WorkplannerDaily(Workplanner):
