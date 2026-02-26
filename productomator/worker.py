@@ -136,13 +136,33 @@ class Workplanner():
             mp = df1
             
             mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out.joinpath(self.output_file_format.format(date = row.name.strftime("%Y%m%d"))), axis= 1)
+            assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
+            # if not mp.index.is_unique:
+                # mp = self._combine_masterplan_duplicates(mp)
             self._masterplan = mp
             return mp
+
+    def combine_masterplan_duplicates(self):
+        if isinstance(self._masterplan, type(None)):
+            self._make_master()
+        mp = self._masterplan
+        if mp.index.is_unique:
+            if self.verbose:
+                print('Masterplan index is already unique, no need to combine duplicates.')
+            return 
+        grouped = mp.groupby(level=0, sort=False)
+        combined = pd.DataFrame({
+            'p2f_in': grouped['p2f_in'].agg(lambda s: s.iloc[0] if len(s) == 1 else list(s)),
+            'p2f_out': grouped['p2f_out'].first(),
+        })
+        return combined.sort_index()
 
     @property
     def masterplan(self):
         if self._masterplan is None:
             self._make_master()
+            mp = self._masterplan
+            assert(mp.index.is_unique), 'Masterplan index is not unique. Consider running the combine_masterplan_duplicates or use the WorkplannerDaily class, which allows truncating files that contribute to multiple days to daily files.'
         return self._masterplan
 
 
@@ -190,7 +210,12 @@ class Workplanner():
         #######
         ## Open input files
         #######
-        ds = xr.open_dataset(row.p2f_in)
+        if isinstance(row.p2f_in, list):
+            ds = xr.open_mfdataset(row.p2f_in)
+            input_files = ','.join(str(p) for p in row.p2f_in)
+        else:
+            ds = xr.open_dataset(row.p2f_in)
+            input_files = str(row.p2f_in)
 
         ## Do some processing here, e.g. add attributes, format the dataset, etc.
 
@@ -203,7 +228,7 @@ class Workplanner():
         for a in dropattrs:
             ds.attrs.pop(a)
 
-        ds.attrs['input_files'] = row.p2f_in
+        ds.attrs['input_files'] = input_files
         ds.attrs['processing_date'] = pd.Timestamp.now().isoformat()
         ds.attrs['processing_server'] = socket.gethostname()
 
@@ -213,13 +238,15 @@ class Workplanner():
         return ds
 
     
-    def process(self):
+    def process(self, raise_errors = False):
         for idx, row in self.workplan.iterrows():
             try:
                 si = self.process_row(row)
                 self.reporter.clean_increment()
 
             except:
+                if raise_errors:
+                    raise
                 print('error rerun workplan to see what remained')
                 self.reporter.errors_increment()
                 continue
@@ -232,8 +259,11 @@ class Workplanner():
         except IndexError:
             print('workplan is empty')
             return None
-            
-        loc = self.masterplan.index.get_loc(idx) - 1
+        loc = self.masterplan.index.get_loc(idx)
+        if isinstance(loc, slice):
+            loc = loc.start
+            assert(False), "The workplan index contains duplicates, this is currently not supported in Workplanner. Consider useing WorkplannerDaily or adjust"
+        loc -=  1
         if loc < 0:
             print('Masterplan and Workplan are identical. Either this is the first time the script is run with this configuration or the start data needs to be adjusted')
             return None
