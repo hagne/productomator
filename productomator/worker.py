@@ -135,7 +135,8 @@ class Workplanner():
             df1.sort_index(inplace=True)
             mp = df1
             
-            mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out.joinpath(self.output_file_format.format(date = row.name.strftime("%Y%m%d"))), axis= 1)
+            mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out.joinpath(self.output_file_format.format(date = row.name.strftime("%Y%m%d"),
+                                                                                                        year = row.name.strftime("%Y"))), axis= 1)
             self._masterplan = mp
             return mp
 
@@ -153,7 +154,7 @@ class Workplanner():
         wp = wp[~(wp.apply(lambda row: row.p2f_out.is_file(), axis = 1))]
         return wp
 
-    def process_row(self, row = None, iloc = None, loc = None):
+    def process_row(self, row = None, iloc = None, loc = None, save = True):
         """This is the method that does the particular work and will need to be overwritten in your subclass.
         Typical components:
         1. read the input file(s) (row.p2f_in)
@@ -193,6 +194,11 @@ class Workplanner():
         ds = xr.open_dataset(row.p2f_in)
 
         ## Do some processing here, e.g. add attributes, format the dataset, etc.
+        #####
+        # Format the dataset variables, this includes reordering and dropping variables.
+        reorg = ['','','','','',]
+
+        ds = ds[reorg]
 
         #########
         # Format the dataset attributes
@@ -203,26 +209,31 @@ class Workplanner():
         for a in dropattrs:
             ds.attrs.pop(a)
 
-        ds.attrs['input_files'] = row.p2f_in
+        ds.attrs['parent_files'] = row.p2f_in.as_posix()
         ds.attrs['processing_date'] = pd.Timestamp.now().isoformat()
         ds.attrs['processing_server'] = socket.gethostname()
-
+        ds.attrs['processing_class'] = f"This file was generated using{self.__class__.__module__}.{self.__class__.__qualname__}"
+        ds.attrs['product_version'] = self.version
         ## Save the output file
-        ds.to_netcdf(row.p2f_out)
+        if save:
+            ds.to_netcdf(row.p2f_out)
         ds.close()
         return ds
 
     
-    def process(self):
+    def process(self, raise_errors = False):
         for idx, row in self.workplan.iterrows():
             try:
                 si = self.process_row(row)
                 self.reporter.clean_increment()
 
-            except:
-                print('error rerun workplan to see what remained')
-                self.reporter.errors_increment()
-                continue
+            except Exception as e:
+                if raise_errors:
+                    raise e
+                else:
+                    print(f'Error occurred while processing row {idx}: {e}')
+                    self.reporter.errors_increment()
+                    continue
             
             print('.', end = '')
 

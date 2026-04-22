@@ -23,7 +23,10 @@ class Reporter(object):
                  verbose = True, 
                  reporting_frequency = (1,'h'),
                  ):
-        self.path2log = _pl.Path(log_folder).joinpath(f'{name}.log')
+        if isinstance(log_folder, type(None)):
+            self.path2log = None
+        else:
+            self.path2log = _pl.Path(log_folder).joinpath(f'{name}.log')
         self.reset()
         self.name = name
         self.reporting_frequency = _pd.to_timedelta(*reporting_frequency)
@@ -83,6 +86,9 @@ class Reporter(object):
         return self._starttime + self.reporting_frequency
     
     def log(self, reset_counters = True, overwrite_reporting_frequency = False):
+        if isinstance(self.path2log, type(None)):
+            print('No log file specified, skipping logging.')
+            return False
         if self.report_due or overwrite_reporting_frequency:
             #create file if it does not exist
             file_exists =  self.path2log.is_file()
