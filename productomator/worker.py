@@ -137,6 +137,7 @@ class Workplanner():
             
             mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out.joinpath(self.output_file_format.format(date = row.name.strftime("%Y%m%d"),
                                                                                                         year = row.name.strftime("%Y"))), axis= 1)
+            assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
             self._masterplan = mp
             return mp
 
