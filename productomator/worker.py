@@ -41,6 +41,7 @@ class Workplanner():
                  glob_pattern_in = '*.nc',
                  start = None,
                  end = None,
+                 file_complete_check = False, # only allows processing of files that are complete
                  reporter = None,
                  verbose = False,
                  **kwargs,
@@ -65,6 +66,9 @@ class Workplanner():
             Start date for processing. Have to provide end as well. glob_pattern_raw is still needed to define extension.
         end: str or pd.Timestamp, optional
             See start.
+        file_complete_check: bool, optional
+            If True, the workplanner will check if the existing output files are complete by looking for a day_complete attribute in the file. 
+            If the attribute is False, the file will be re-processed. If the first complete file is found, the attribute will no longer be checked for older files, as they are assumed to be complete as well. 
         glob_pattern : str, optional
             A glob pattern to match input files. Default is '*.nc'.
 
@@ -87,7 +91,7 @@ class Workplanner():
                 return ds
         """
 
-
+        self.file_complete_check = file_complete_check
         self.output_file_format = output_file_format 
         
         p2fld_in = p2fld_in.format(**kwargs)
@@ -164,13 +168,53 @@ class Workplanner():
             assert(mp.index.is_unique), 'Masterplan index is not unique. Consider running the combine_masterplan_duplicates or use the WorkplannerDaily class, which allows truncating files that contribute to multiple days to daily files.'
         return self._masterplan
 
-
-
     @property
     def workplan(self):
         wp = self.masterplan.dropna()
-        wp = wp[~(wp.apply(lambda row: row.p2f_out.is_file(), axis = 1))]
-        return wp
+
+        # Files that don't exist must be processed.
+        exists = wp.p2f_out.apply(lambda p: p.is_file())
+        where_reprocess = ~exists
+
+        # If disabled, don't open any files.
+        if not self.file_complete_check:
+            return wp[where_reprocess]
+
+        # Check only trailing existing files (newest -> oldest) until first complete day.
+        for idx, row in wp[exists].iloc[::-1].iterrows():
+            with xr.open_dataset(row.p2f_out) as ds:
+                assert hasattr(ds, "day_complete"), (
+                   f"Input files need a day_complete attribute for file-complete checks. Missing in {row.p2f_out}"
+                )
+                dc = ds.day_complete
+                complete = dc.strip().lower() == "true"
+
+            if complete:
+                break  # older files are assumed already complete
+            else:
+                where_reprocess.loc[idx] = True  # reprocess incomplete trailing file(s)
+
+        return wp[where_reprocess]
+
+    # @property
+    # def workplan(self):
+    #     wp = self.masterplan.dropna()
+    #     file_complete_check = self.file_complete_check
+    #     def check_file_exists_and_complete(row):
+    #         if not row.p2f_out.is_file():
+    #             return False
+    #         else:
+    #             if file_complete_check:
+    #                 with xr.open_dataset(row.p2f_out) as ds:
+    #                     assert(hasattr(ds, 'day_complete')), 'Input files need to have a day_complete attribute for the file complete check.'
+    #                     complete = bool(ds.day_complete)
+    #                 if complete:
+    #                     file_complete_check = False # only check until the first comple file is found.
+    #                 return complete
+    #             #test if complete
+    #     # wp = wp[~(wp.apply(lambda row: row.p2f_out.is_file(), axis = 1))]
+    #     wp = wp[~(wp.apply(check_file_exists_and_complete, axis = 1))]
+    #     return wp
 
     def process_row(self, row = None, iloc = None, loc = None, save = True):
         """This is the method that does the particular work and will need to be overwritten in your subclass.
@@ -307,7 +351,7 @@ class WorkplannerDaily(Workplanner):
 
         start_pos = df.index.searchsorted(mp.index, side='left') - 1
         start_pos = [int(sp) if sp>= 0 else 0 for sp in start_pos]
-        end_pos = end_pos = df.index.searchsorted(mp.index + pd.Timedelta(days=1), side='left')
+        end_pos = df.index.searchsorted(mp.index + pd.Timedelta(days=1), side='left')
         idxmax = len(df)-1
         end_pos =  [int(sp) if sp<= idxmax else idxmax for sp in end_pos]
 
