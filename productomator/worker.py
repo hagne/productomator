@@ -5,7 +5,7 @@ import xarray as xr
 import productomator.lab as prodlab
 
 
-def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpattern: str = ""):
+def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpattern: str = "", input_directory_structure: str = "yearly"):
     """ Generator that yields all files between start and end dates (inclusive) in the given root directory.
     Parameters
     ----------
@@ -26,8 +26,10 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpat
     root = root
     d = start
     while d <= end:
-        year_dir = root / f"{d.year}"
-        assert(year_dir.exists()), f'Year directory does not exist: {year_dir}'
+        if input_directory_structure == 'yearly':
+            year_dir = root / f"{d.year}"
+        else:
+            year_dir = root
         yield from year_dir.glob(f"*{d:%Y%m%d}{globpattern}")
         d += pd.to_timedelta(1, 'D')
 
@@ -41,6 +43,7 @@ class Workplanner():
                  glob_pattern_in = '*.nc',
                  start = None,
                  end = None,
+                 input_directory_structure = 'flat',
                  file_complete_check = False, # only allows processing of files that are complete
                  reporter = None,
                  verbose = False,
@@ -66,6 +69,10 @@ class Workplanner():
             Start date for processing. Have to provide end as well. glob_pattern_raw is still needed to define extension.
         end: str or pd.Timestamp, optional
             See start.
+        input_directory_structure: str, optional
+            Define the input directory structure, either 'yearly' or 'flat'.
+                yearly: expects subdirectories for each year, e.g. /data/2020/, /data/2021/, etc.
+                flat: expects all files in the root input directory.
         file_complete_check: bool, optional
             If True, the workplanner will check if the existing output files are complete by looking for a day_complete attribute in the file. 
             If the attribute is False, the file will be re-processed. If the first complete file is found, the attribute will no longer be checked for older files, as they are assumed to be complete as well. 
@@ -93,7 +100,8 @@ class Workplanner():
 
         self.file_complete_check = file_complete_check
         self.output_file_format = output_file_format 
-        
+        self.input_directory_structure = input_directory_structure
+
         p2fld_in = p2fld_in.format(**kwargs)
         self.p2fld_in = pl.Path(p2fld_in)
         if not self.p2fld_in.is_dir():
@@ -101,7 +109,6 @@ class Workplanner():
         self.kwargs = kwargs
         for kw in kwargs:
             setattr(self, kw, kwargs[kw])
-
         p2fld_out = p2fld_out.format(**kwargs)
         self.p2fld_out = pl.Path(p2fld_out)
         self.date_from_name = date_from_name
@@ -123,13 +130,16 @@ class Workplanner():
         if isinstance(self._processing_start, type(None)):
             if self.verbose:
                 print(f'Get all files in {self.p2fld_in} with glob pattern: {self.glob_pattern_in}')
-            gen = self.p2fld_in.glob(self.glob_pattern_in)
+            if self.input_directory_structure == 'yearly':
+                gen = self.p2fld_in.glob(f"*/{self.glob_pattern_in}")
+            else:
+                gen = self.p2fld_in.glob(self.glob_pattern_in)
         else:
             start = pd.to_datetime(self._processing_start)
             end = pd.to_datetime(self._processing_end) if not isinstance(self._processing_end, type(None)) else pd.Timestamp.now()
             if self.verbose:
                 print(f'Get all files in {self.p2fld_in} with "files_between" function and start: {start}, end: {end} and glob pattern: {self.glob_pattern_in}')
-            gen = files_between(self.p2fld_in, start, end, globpattern = self.glob_pattern_in)
+            gen = files_between(self.p2fld_in, start, end, globpattern = self.glob_pattern_in, input_directory_structure = self.input_directory_structure)
         df  = pd.DataFrame(gen, columns=['p2f_in'])
         return df
 
@@ -375,19 +385,16 @@ class WorkplannerDaily(Workplanner):
             last_row = wp.loc[last_idx]
             dst = xr.open_dataset(last_row.p2f_out)
             self.tp_dst = dst.copy()
-            try:
-                dc = dst.day_complete.strip().lower()
-                assert(dc in ['true','false']), f'day_complete needs to be True or False, found {dc}.'
-                dc = dc == 'true'
-                if not dc:
-                    if self.verbose:
-                        print(f'Output file {last_row.p2f_out} is not complete and will be re-processed.')
-                    where.loc[last_idx] = False
-            except:
-                print(f'This is bound to happen. Implement error handling here.')
-                raise 
-            finally:
-                dst.close()
+            if 'day_complete' not in dst.attrs:
+                raise AttributeError(f'File complete check is enabled, but the day_complete attribute is missing in last processed file {last_row.p2f_out}. Add "attrs["day_complete"] = row.day_complete.__str__()" to the process_row method of your Workplanner subclass to fix this. You will also need to remove the previous file or somehow add the attribute to it.')
+            dc = dst.day_complete.strip().lower()
+            assert(dc in ['true','false']), f'day_complete needs to be True or False, found {dc}.'
+            dc = dc == 'true'
+            if not dc:
+                if self.verbose:
+                    print(f'Output file {last_row.p2f_out} is not complete and will be re-processed.')
+                where.loc[last_idx] = False
+
         wp = wp[~where]
         return wp
     
