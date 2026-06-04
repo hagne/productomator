@@ -342,8 +342,10 @@ class WorkplannerDaily(Workplanner):
         if df.empty:
             self._masterplan = pd.DataFrame(columns=['p2f_in', 'p2f_out'])
             return self._masterplan
-        
-        df.index = df.p2f_in.apply(lambda p: pd.to_datetime(self.date_from_name(p.name)))
+        try:
+            df.index = df.p2f_in.apply(lambda p: pd.to_datetime(self.date_from_name(p.name)))
+        except pd.errors.DatabaseError as e:
+            raise pd.errors.DatabaseError(f'Error parsing dates from file names. Make sure the date_from_name function is correct. Original error: {e}')
         df.sort_index(inplace=True)
         idx = df.index
         mp = pd.DataFrame(index= pd.date_range(idx[0].normalize(), idx[-1].normalize(), freq='D'), columns=['p2f_in', 'p2f_out'])
