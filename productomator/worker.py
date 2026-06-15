@@ -44,6 +44,7 @@ class Workplanner():
                  start = None,
                  end = None,
                  input_directory_structure = 'flat',
+                 output_directory_structure = None,
                  file_complete_check = False, # only allows processing of files that are complete
                  reporter = None,
                  verbose = False,
@@ -73,6 +74,8 @@ class Workplanner():
             Define the input directory structure, either 'yearly' or 'flat'.
                 yearly: expects subdirectories for each year, e.g. /data/2020/, /data/2021/, etc.
                 flat: expects all files in the root input directory.
+        output_directory_structure: str, optional
+            Currently only None is allowed, which means that the output directory structure is the same as the input directory structure.
         file_complete_check: bool, optional
             If True, the workplanner will check if the existing output files are complete by looking for a day_complete attribute in the file. 
             If the attribute is False, the file will be re-processed. If the first complete file is found, the attribute will no longer be checked for older files, as they are assumed to be complete as well. 
@@ -101,6 +104,10 @@ class Workplanner():
         self.file_complete_check = file_complete_check
         self.output_file_format = output_file_format 
         self.input_directory_structure = input_directory_structure
+        assert(output_directory_structure in [None]), 'Currently only None is allowed, which means that the output directory structure is the same as the input directory structure. Programming required for different output directory structure.'
+        if output_directory_structure is None:
+            output_directory_structure = input_directory_structure
+        self.output_directory_structure = output_directory_structure
 
         p2fld_in = p2fld_in.format(**kwargs)
         self.p2fld_in = pl.Path(p2fld_in)
@@ -111,6 +118,9 @@ class Workplanner():
             setattr(self, kw, kwargs[kw])
         p2fld_out = p2fld_out.format(**kwargs)
         self.p2fld_out = pl.Path(p2fld_out)
+        if output_directory_structure == 'yearly':
+            self.p2fld_out = self.p2fld_out / '{year}'
+
         self.date_from_name = date_from_name
         self.glob_pattern_in = glob_pattern_in
         if isinstance(reporter, type(None)):
@@ -147,10 +157,13 @@ class Workplanner():
             df1 = self._get_input_files()
             df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
             df1.sort_index(inplace=True)
-            mp = df1
-            
-            mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out.joinpath(self.output_file_format.format(date = row.name.strftime("%Y%m%d"),
-                                                                                                        year = row.name.strftime("%Y"))), axis= 1)
+            mp = df1                
+            mp['p2f_out'] = mp.apply(lambda row: pl.Path(str(self.p2fld_out.joinpath(self.output_file_format)).format(date = row.name.strftime("%Y%m%d"), 
+                                                                                                                      year = row.name.strftime("%Y"),
+                                                                                                                      month = row.name.strftime("%m"),
+                                                                                                                      day = row.name.strftime("%d"),
+                                                                                                                      **self.kwargs)),
+                                                                                                                axis= 1) # this might look overly complicated but is necessary to do the full formatting including yearly subdirectories if needed.
             assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
             self._masterplan = mp
             return mp
@@ -364,11 +377,11 @@ class WorkplannerDaily(Workplanner):
             self._masterplan = pd.DataFrame(columns=['p2f_in', 'p2f_out'])
             return self._masterplan
         
-        mp['p2f_out'] = mp.apply(lambda row: self.p2fld_out / self.output_file_format.format(date = row.name.strftime("%Y%m%d"), 
+        mp['p2f_out'] = mp.apply(lambda row: pl.Path(str(self.p2fld_out / self.output_file_format).format(date = row.name.strftime("%Y%m%d"), 
                                                                                              year = row.name.strftime("%Y"),
                                                                                              month = row.name.strftime("%m"),
                                                                                              day = row.name.strftime("%d"),
-                                                                                             **self.kwargs),
+                                                                                             **self.kwargs)),
                                                                                              axis = 1)
 
         start_pos = df.index.searchsorted(mp.index, side='left') - 1
