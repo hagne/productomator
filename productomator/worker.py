@@ -172,6 +172,13 @@ class Workplanner():
 
     @property
     def masterplan(self):
+        """
+        Troubleshooting tips
+        ----------------------
+        If the masterplan is empty:
+        1. Check if the input directory is correct and mounted. 
+            - try: self.p2fld_in.exists()
+            - try: self._get_input_files() """
         if self._masterplan is None:
             self._make_master()
             mp = self._masterplan
