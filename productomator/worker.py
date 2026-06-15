@@ -408,13 +408,14 @@ class WorkplannerDaily(Workplanner):
         if where.any():
             last_idx = where[where].index[-1]
             last_row = wp.loc[last_idx]
-            dst = xr.open_dataset(last_row.p2f_out)
-            self.tp_dst = dst.copy()
-            if 'day_complete' not in dst.attrs:
-                raise AttributeError(f'File complete check is enabled, but the day_complete attribute is missing in last processed file {last_row.p2f_out}. Add "attrs["day_complete"] = row.day_complete.__str__()" to the process_row method of your Workplanner subclass to fix this. You will also need to remove the previous file or somehow add the attribute to it.')
-            dc = dst.day_complete.strip().lower()
-            assert(dc in ['true','false']), f'day_complete needs to be True or False, found {dc}.'
-            dc = dc == 'true'
+            with xr.open_dataset(last_row.p2f_out) as dst:
+                dst = xr.open_dataset(last_row.p2f_out)
+                self.tp_dst = dst.copy()
+                if 'day_complete' not in dst.attrs:
+                    raise AttributeError(f'File complete check is enabled, but the day_complete attribute is missing in last processed file {last_row.p2f_out}. Add "attrs["day_complete"] = row.day_complete.__str__()" to the process_row method of your Workplanner subclass to fix this. You will also need to remove the previous file or somehow add the attribute to it.')
+                dc = dst.day_complete.strip().lower()
+                assert(dc in ['true','false']), f'day_complete needs to be True or False, found {dc}.'
+                dc = dc == 'true'
             if not dc:
                 if self.verbose:
                     print(f'Output file {last_row.p2f_out} is not complete and will be re-processed.')
