@@ -104,6 +104,10 @@ class Workplanner():
         self.file_complete_check = file_complete_check
         self.output_file_format = output_file_format 
         self.input_directory_structure = input_directory_structure
+        if not isinstance(input_directory_structure, str):
+            raise TypeError(f'input_directory_structure must be a string, got {type(input_directory_structure)}')
+        if input_directory_structure not in ['yearly', 'flat']:
+            raise ValueError(f'input_directory_structure must be either "yearly" or "flat", got {input_directory_structure}')
         assert(output_directory_structure in [None]), 'Currently only None is allowed, which means that the output directory structure is the same as the input directory structure. Programming required for different output directory structure.'
         if output_directory_structure is None:
             output_directory_structure = input_directory_structure
