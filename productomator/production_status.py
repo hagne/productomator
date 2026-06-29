@@ -14,7 +14,21 @@ import matplotlib.pyplot as plt
 import atmPy.tools.plt_tool_kit as plt_tools
 
 def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
+              ignore_list = [],
               nodays = 9, verbose = False):
+    """
+    Parameters
+    ----------
+    path2logs : str, optional
+        DESCRIPTION. The default is '/home/grad/htelg/.processlogs/'.
+    ignore_list : list, optional
+        Processes with this name will be ignored. The default is [].
+    nodays : int, optional
+        The number of days to look back for data. The default is 9.
+    verbose : bool, optional
+        If True, print additional information. The default is False.
+    """
+    
     p2fl = pl.Path(path2logs)
     duration = pd.to_timedelta(nodays,'d')
     end = pd.Timestamp.now()
@@ -27,6 +41,10 @@ def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
             print(f'path2logfile: {p2f}')
         # print(p2f.name)
         if p2f.is_dir():
+            continue
+        if p2f.name in ignore_list:
+            if verbose:
+                print(f'{p2f.name} is in ignore list, skip')
             continue
         df = pd.read_csv(p2f, index_col=0)
         df.index = pd.to_datetime(df.index)
