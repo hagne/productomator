@@ -1,5 +1,6 @@
 import pathlib as pl
 import socket
+import sqlite3
 import pandas as pd
 import xarray as xr
 import productomator.lab as prodlab
@@ -37,9 +38,10 @@ class Workplanner():
     def __init__(self,
                  # data in and output folders
                  p2fld_in,
-                 p2fld_out,
-                 date_from_name,
-                 output_file_format, #lalalal_{date}.nc'
+                 p2fld_out = None,
+                 database = None,
+                 date_from_name = None,
+                 output_file_format = None, #lalalal_{date}.nc'
                  glob_pattern_in = '*.nc',
                  start = None,
                  end = None,
@@ -58,6 +60,16 @@ class Workplanner():
             Path to the input folder containing data files to be processed.
         p2fld_out : str or pathlib.Path
             Path to the output folder where processed files will be saved.
+        database : tuple, optional
+            Currently, only database or p2fld_out can be set. When database is set, the dates in the masterplan and the dates column in the database will be mached. Missing values will be left for the workplan.
+            Database is a tuple of 
+                1. Path to a database 
+                2. Name of the table in the database
+                3. Column name of the date
+                4. Column name of the file path; If "None", the date will be used to detemine if a file needs processing.
+            Example: 
+                ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'input_file'), his will match the file names in the p2fld_in with the input_file in the database table.
+                ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'None'), this will match the dates in the masterplan (derived from the p2fld_in) with the dates in the database table (in the row_timestamp column).
         date_from_name : function
             A function that extracts a date from a filename. Example: lambda name: name.split('.')[-2].split('_')[-1]
         output_file_format : str
@@ -120,10 +132,22 @@ class Workplanner():
         self.kwargs = kwargs
         for kw in kwargs:
             setattr(self, kw, kwargs[kw])
-        p2fld_out = p2fld_out.format(**kwargs)
-        self.p2fld_out = pl.Path(p2fld_out)
-        if output_directory_structure == 'yearly':
-            self.p2fld_out = self.p2fld_out / '{year}'
+
+
+        #####
+        # the output folder or database
+        self.database = database
+        self.p2fld_out = p2fld_out
+        if not isinstance(database, type(None)) and not isinstance(p2fld_out, type(None)):
+            raise ValueError('Currently, only one of database or p2fld_out can be set.')
+
+        if database is not None:
+            self.database = database
+        else:
+            p2fld_out = p2fld_out.format(**kwargs)
+            self.p2fld_out = pl.Path(p2fld_out)
+            if output_directory_structure == 'yearly':
+                self.p2fld_out = self.p2fld_out / '{year}'
 
         self.date_from_name = date_from_name
         self.glob_pattern_in = glob_pattern_in
@@ -138,7 +162,32 @@ class Workplanner():
         self._processing_start = start
         self._processing_end = end
 
-        self._masterplan = None    
+        self._masterplan = None   
+
+    def _read_database(self):
+        # read the datacolumn from the database
+        def connect(path2database):
+            conn = sqlite3.connect(path2database)
+            conn.row_factory = sqlite3.Row
+            return conn
+        path2database, table_name, date_column, p2f_column = self.database
+        with connect(path2database) as conn:
+            df = pd.read_sql_query(
+                f'SELECT * FROM {table_name}',# ORDER BY {date_column} DESC',
+                conn,
+                # index_col='row_timestamp',
+            )
+        if len(df) == 0:
+            print(f'Warning: Database {path2database} table {table_name} is empty.')
+            return None
+        if p2f_column == 'None':
+            df['in_database'] = True
+        else:
+            df['in_database'] = df.apply(lambda row: pl.Path(row[p2f_column]).name, axis = 1)
+        df.index  = df.apply(lambda row: pd.to_datetime(row[date_column]), axis = 1)
+        df.sort_index(inplace=True)
+        return df
+
 
     def _get_input_files(self):
         if isinstance(self._processing_start, type(None)):
@@ -161,18 +210,28 @@ class Workplanner():
             df1 = self._get_input_files()
             df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
             df1.sort_index(inplace=True)
-            mp = df1                
-            mp['p2f_out'] = mp.apply(lambda row: pl.Path(str(self.p2fld_out.joinpath(self.output_file_format)).format(date = row.name.strftime("%Y%m%d"), 
-                                                                                                                      year = row.name.strftime("%Y"),
-                                                                                                                      month = row.name.strftime("%m"),
-                                                                                                                      day = row.name.strftime("%d"),
-                                                                                                                      **self.kwargs)),
-                                                                                                                axis= 1) # this might look overly complicated but is necessary to do the full formatting including yearly subdirectories if needed.
+            mp = df1      
+            if self.p2fld_out is not None:          
+                mp['p2f_out'] = mp.apply(lambda row: pl.Path(str(self.p2fld_out.joinpath(self.output_file_format)).format(date = row.name.strftime("%Y%m%d"), 
+                                                                                                                        year = row.name.strftime("%Y"),
+                                                                                                                        month = row.name.strftime("%m"),
+                                                                                                                        day = row.name.strftime("%d"),
+                                                                                                                        **self.kwargs)),
+                                                                                                                    axis= 1) # this might look overly complicated but is necessary to do the full formatting including yearly subdirectories if needed.
+            elif self.database is not None:
+                df = self._read_database()
+                if df is None:
+                    mp['in_database'] = None
+                else:
+                    mp['in_database'] = df.in_database
+            else:
+                raise ValueError('Either p2fld_out or database must be set.')    
             assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
             self._masterplan = mp
             return mp
 
     def combine_masterplan_duplicates(self):
+        """Combine master-plan rows that share the same timestamp."""
         if isinstance(self._masterplan, type(None)):
             self._make_master()
         mp = self._masterplan
@@ -181,11 +240,20 @@ class Workplanner():
                 print('Masterplan index is already unique, no need to combine duplicates.')
             return 
         grouped = mp.groupby(level=0, sort=False)
-        combined = pd.DataFrame({
-            'p2f_in': grouped['p2f_in'].agg(lambda s: s.iloc[0] if len(s) == 1 else list(s)),
-            'p2f_out': grouped['p2f_out'].first(),
-        })
-        return combined.sort_index()
+        if self.p2fld_out is not None:
+            combined = pd.DataFrame({
+                'p2f_in': grouped['p2f_in'].agg(lambda s: s.iloc[0] if len(s) == 1 else list(s)),
+                'p2f_out': grouped['p2f_out'].first(),
+            })
+        elif self.database is not None:
+            combined = grouped.agg({
+                'p2f_in': lambda s: s.iloc[0] if len(s) == 1 else list(s),
+                'in_database': 'first',
+            })
+        else:
+            raise ValueError('Either p2fld_out or database must be set.')
+        self._masterplan = combined.sort_index()
+        return self._masterplan
 
     @property
     def masterplan(self):
@@ -204,31 +272,44 @@ class Workplanner():
 
     @property
     def workplan(self):
-        wp = self.masterplan.dropna()
+        if self.p2fld_out is not None:
+            # Files that don't exist must be processed.
+            wp = self.masterplan.dropna()
+            exists = wp.p2f_out.apply(lambda p: p.is_file())
+            where_reprocess = ~exists
 
-        # Files that don't exist must be processed.
-        exists = wp.p2f_out.apply(lambda p: p.is_file())
-        where_reprocess = ~exists
+            # If disabled, don't open any files.
+            if not self.file_complete_check:
+                return wp[where_reprocess]
 
-        # If disabled, don't open any files.
-        if not self.file_complete_check:
+            # Check only trailing existing files (newest -> oldest) until first complete day.
+            for idx, row in wp[exists].iloc[::-1].iterrows():
+                with xr.open_dataset(row.p2f_out) as ds:
+                    assert hasattr(ds, "day_complete"), (
+                    f"Input files need a day_complete attribute for file-complete checks. Missing in {row.p2f_out}"
+                    )
+                    dc = ds.day_complete
+                    complete = dc.strip().lower() == "true"
+
+                if complete:
+                    break  # older files are assumed already complete
+                else:
+                    where_reprocess.loc[idx] = True  # reprocess incomplete trailing file(s)
             return wp[where_reprocess]
 
-        # Check only trailing existing files (newest -> oldest) until first complete day.
-        for idx, row in wp[exists].iloc[::-1].iterrows():
-            with xr.open_dataset(row.p2f_out) as ds:
-                assert hasattr(ds, "day_complete"), (
-                   f"Input files need a day_complete attribute for file-complete checks. Missing in {row.p2f_out}"
-                )
-                dc = ds.day_complete
-                complete = dc.strip().lower() == "true"
-
-            if complete:
-                break  # older files are assumed already complete
+        elif self.database is not None:
+            mp = self.masterplan 
+            path2database, table_name, date_column, p2f_column = self.database
+            if p2f_column == 'None':
+                in_db = ~self.masterplan.in_database.isna()
             else:
-                where_reprocess.loc[idx] = True  # reprocess incomplete trailing file(s)
-
-        return wp[where_reprocess]
+                in_db = mp.apply(lambda row: row.p2f_in.name == row.in_database, axis = 1)
+            wp = mp[~in_db]
+            wp = wp.drop('in_database', axis = 1)
+            return wp
+        else:
+            raise ValueError("Either p2fld_out or database must be set.")
+        return 
 
     # @property
     # def workplan(self):
