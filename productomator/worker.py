@@ -71,7 +71,7 @@ class Workplanner():
                 ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'input_file'), his will match the file names in the p2fld_in with the input_file in the database table.
                 ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'None'), this will match the dates in the masterplan (derived from the p2fld_in) with the dates in the database table (in the row_timestamp column).
         date_from_name : function
-            A function that extracts a date from a filename. Example: lambda name: name.split('.')[-2].split('_')[-1]
+            A function that extracts a date from a filename. Not from the entire path, just the name (str)!! Example: lambda name: name.split('.')[-2].split('_')[-1]
         output_file_format : str
             A format string for naming output files, with a placeholder for the date, year, month, or day. You can define more placholders as long as you provide the variables in the kwargs or declare them in the subclass. 
             Example: '{site}_specflux_{date}.nc'
