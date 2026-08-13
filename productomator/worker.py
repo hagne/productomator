@@ -37,7 +37,7 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpat
 class Workplanner():
     def __init__(self,
                  # data in and output folders
-                 p2fld_in,
+                 p2fld_in = None,
                  p2fld_out = None,
                  database = None,
                  date_from_name = None,
@@ -57,7 +57,7 @@ class Workplanner():
         Parameters
         ----------
         p2fld_in : str or pathlib.Path
-            Path to the input folder containing data files to be processed.
+            Path to the input folder containing data files to be processed. If None, a daily output file will be created for the time range specified by start and end. That implies that start and end can not be None.
         p2fld_out : str or pathlib.Path
             Path to the output folder where processed files will be saved.
         database : tuple, optional
@@ -125,10 +125,15 @@ class Workplanner():
             output_directory_structure = input_directory_structure
         self.output_directory_structure = output_directory_structure
 
-        p2fld_in = p2fld_in.format(**kwargs)
-        self.p2fld_in = pl.Path(p2fld_in)
-        if not self.p2fld_in.is_dir():
-            raise ValueError(f'Input folder {self.p2fld_in} does not exist. Make sure the volume is mounted.')
+        if p2fld_in is None:
+            if start is None or end is None:
+                raise ValueError('start and end must be set when p2fld_in is None.')
+            self.p2fld_in = None
+        else:
+            p2fld_in = p2fld_in.format(**kwargs)
+            self.p2fld_in = pl.Path(p2fld_in)
+            if not self.p2fld_in.is_dir():
+                raise ValueError(f'Input folder {self.p2fld_in} does not exist. Make sure the volume is mounted.')
         self.kwargs = kwargs
         for kw in kwargs:
             setattr(self, kw, kwargs[kw])
@@ -207,17 +212,29 @@ class Workplanner():
         return df
 
     def _make_master(self):
-            df1 = self._get_input_files()
-            df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
-            df1.sort_index(inplace=True)
+            if self.p2fld_in is None:
+                df1 = pd.DataFrame(index=pd.date_range(
+                    pd.to_datetime(self._processing_start),
+                    pd.to_datetime(self._processing_end),
+                    freq='D',
+                ))
+            else:
+                df1 = self._get_input_files()
+                df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
+                df1.sort_index(inplace=True)
             mp = df1      
             if self.p2fld_out is not None:          
-                mp['p2f_out'] = mp.apply(lambda row: pl.Path(str(self.p2fld_out.joinpath(self.output_file_format)).format(date = row.name.strftime("%Y%m%d"), 
-                                                                                                                        year = row.name.strftime("%Y"),
-                                                                                                                        month = row.name.strftime("%m"),
-                                                                                                                        day = row.name.strftime("%d"),
-                                                                                                                        **self.kwargs)),
-                                                                                                                    axis= 1) # this might look overly complicated but is necessary to do the full formatting including yearly subdirectories if needed.
+                output_path_format = str(self.p2fld_out.joinpath(self.output_file_format))
+                mp['p2f_out'] = [
+                    pl.Path(output_path_format.format(
+                        date=timestamp.strftime("%Y%m%d"),
+                        year=timestamp.strftime("%Y"),
+                        month=timestamp.strftime("%m"),
+                        day=timestamp.strftime("%d"),
+                        **self.kwargs,
+                    ))
+                    for timestamp in mp.index
+                ]
             elif self.database is not None:
                 df = self._read_database()
                 if df is None:
@@ -404,6 +421,7 @@ class Workplanner():
 
     
     def process(self, raise_errors = False):
+        si = None
         for idx, row in self.workplan.iterrows():
             try:
                 si = self.process_row(row)
@@ -418,6 +436,7 @@ class Workplanner():
                     continue
             
             print('.', end = '')
+        return si
 
     def get_last_row_before_workplan(self):
         try:
