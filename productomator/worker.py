@@ -348,6 +348,47 @@ class Workplanner():
     #     wp = wp[~(wp.apply(check_file_exists_and_complete, axis = 1))]
     #     return wp
 
+    def open_local_day(self, row, open_p2f_in, cut_nighttime = False):
+        """opens this and the next days file if needed. Also cuts of previous and next day"""
+        # next one needed?
+        out = {}
+        ds = open_p2f_in(row.p2f_in)
+        sunup_start = ds.solar_zenith_angle.isel(datetime = 0) < 90 #still in the sky in beginning of file
+        sunup_end = ds.solar_zenith_angle.isel(datetime = -1) < 90 #still in the sky at end of file
+        # sunrising_end = ds.solar_elevation.differentiate('time').isel(time = -1) > 0 #sun is rising at the end
+        next_day_needed = False
+        dslist = []
+        if sunup_start:
+        # delete everything before first solar_elevation minimum
+            dslist.append(ds.sel(datetime = slice(ds.solar_zenith_angle.idxmax(), None)))
+        else:
+            dslist.append(ds)
+        
+        if sunup_end:
+            try:
+                row_next = self.masterplan.iloc[self.masterplan.index.get_loc(row.name)+1]
+            except IndexError:
+                print('We have to wait for the next day to to finish this local day.')
+                # assert(False)
+                out['status'] = "Day not done yet"
+                return out
+            
+            next_day_needed = True
+        
+            dsnext = open_p2f_in(row_next.p2f_in)
+            dsnext = dsnext.sel(datetime = slice(None,dsnext.solar_zenith_angle.idxmax()))
+            dslist.append(dsnext)
+            self.tp_dsnext = dsnext.copy()
+        
+        ds_wholeday = xr.concat(dslist, dim = 'datetime')
+        if cut_nighttime:
+            ds_wholeday = ds_wholeday.where(ds_wholeday.solar_zenith_angle < 90, drop = True)
+        else:
+            assert(False), 'cut_nighttime = False is not implemented yet, please implement it if you need it.'
+        out['status'] = ['valid']
+        out['dataset']= ds_wholeday
+        return out
+
     def process_row(self, row = None, iloc = None, loc = None, save = True):
         """This is the method that does the particular work and will need to be overwritten in your subclass.
         Typical components:
