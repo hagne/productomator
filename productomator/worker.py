@@ -5,8 +5,23 @@ import pandas as pd
 import xarray as xr
 import productomator.lab as prodlab
 
+class DeprecationError(Exception):
+    def __init__(self, deprecated_arg, alt = None):
+        self.deprecated_arg = deprecated_arg
+        self.alt = alt
+        self.message = f"{self.deprecated_arg} is deprecated"
+        if self.alt is not None:
+            self.message += f", use {self.alt} instead"
+        self.message += "."
+        super().__init__(self.message)
 
-def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpattern: str = "", input_directory_structure: str = "yearly"):
+
+
+
+
+def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, 
+                  globpattern: str = "", 
+                  input_directory_structure: str = "yearly", verbose = False):
     """ Generator that yields all files between start and end dates (inclusive) in the given root directory.
     Parameters
     ----------
@@ -23,6 +38,7 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpat
     pl.Path
         Paths to files between start and end dates.
     """ 
+    assert('{date:' in globpattern), f"globpattern ({globpattern}) has to define how timestamps (dates) are formated in the filename. E.g. '*{{date:%Y%m%d}}*' "
     assert(end > start), f'End must come after start! (end: {end}, start{start})'
     root = root
     d = start
@@ -31,7 +47,9 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, globpat
             year_dir = root / f"{d.year}"
         else:
             year_dir = root
-        yield from year_dir.glob(f"*{d:%Y%m%d}{globpattern}")
+        assert(year_dir.exists()), f'The directory {year_dir} does not exists, be more carefull with you start, end, day arguments.'
+        # yield from year_dir.glob(globpattern.format(date = d))
+        yield from ((d, path) for path in year_dir.glob(globpattern.format(date = d)))
         d += pd.to_timedelta(1, 'D')
 
 class Workplanner():
@@ -40,11 +58,12 @@ class Workplanner():
                  p2fld_in = None,
                  p2fld_out = None,
                  database = None,
-                 date_from_name = None,
-                 output_file_format = None, #lalalal_{date}.nc'
-                 glob_pattern_in = '*.nc',
+                #  date_from_name = None,
+                 output_file_format =  'productname_{date}.nc', #lalalal_{date}.nc'
+                 file_name_format = '*{date:%Y%m%d}*',
                  start = None,
                  end = None,
+                 days = None,
                  input_directory_structure = 'flat',
                  output_directory_structure = None,
                  file_complete_check = False, # only allows processing of files that are complete
@@ -57,29 +76,44 @@ class Workplanner():
         Parameters
         ----------
         p2fld_in : str or pathlib.Path
-            Path to the input folder containing data files to be processed. If None, a daily output file will be created for the time range specified by start and end. That implies that start and end can not be None.
+            Path to the input folder containing data files to be processed. If None, a daily 
+            output file will be created for the time range specified by start and end. That 
+            implies that start and end can not be None.
         p2fld_out : str or pathlib.Path
             Path to the output folder where processed files will be saved.
         database : tuple, optional
-            Currently, only database or p2fld_out can be set. When database is set, the dates in the masterplan and the dates column in the database will be mached. Missing values will be left for the workplan.
+            Currently, only database or p2fld_out can be set. When database is set, the dates 
+            in the masterplan and the dates column in the database will be mached. Missing values
+              will be left for the workplan.
             Database is a tuple of 
                 1. Path to a database 
                 2. Name of the table in the database
                 3. Column name of the date
-                4. Column name of the file path; If "None", the date will be used to detemine if a file needs processing.
+                4. Column name of the file path; If "None", the date will be used to detemine if
+                a file needs processing.
             Example: 
-                ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'input_file'), his will match the file names in the p2fld_in with the input_file in the database table.
-                ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'None'), this will match the dates in the masterplan (derived from the p2fld_in) with the dates in the database table (in the row_timestamp column).
-        date_from_name : function
-            A function that extracts a date from a filename. Not from the entire path, just the name (str)!! Example: lambda name: name.split('.')[-2].split('_')[-1]
+                ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'input_file'), his 
+                will match the file names in the p2fld_in with the input_file in the database 
+                table. ('/path/to/database.sqlite', 'table_name', 'row_timestamp', 'None'), this 
+                will match the dates in the masterplan (derived from the p2fld_in) with the dates 
+                in the database table (in the row_timestamp column).
+        date_from_name : Deprecated!! function
+            A function that extracts a date from a filename. Not from the entire path, just the 
+            name (str)!! Example: lambda name: name.split('.')[-2].split('_')[-1]
         output_file_format : str
-            A format string for naming output files, with a placeholder for the date, year, month, or day. You can define more placholders as long as you provide the variables in the kwargs or declare them in the subclass. 
+            A format string for naming output files, with a placeholder for the date, year, month, 
+            or day. You can define more placholders as long as you provide the variables in the 
+            kwargs or declare them in the subclass. 
             Example: '{site}_specflux_{date}.nc'
-                In this example, provide the site variable in the kwargs or somehow declare self.site in the subclassing effort.
+                In this example, provide the site variable in the kwargs or somehow declare 
+                self.site in the subclassing effort.
             Example 2: '{year}/monthly_product_{Year}{month}.nc'
-                
+        file_name_format: str, e.g. '*{date:%Y%m%d}*' or '*{date:%y%j}*'
+            The pattern the worker will look for in all files. It is important that the str defines
+            how the date is formated. 
         start: str or pd.Timestamp, optional
-            Start date for processing. Have to provide end as well. glob_pattern_raw is still needed to define extension.
+            Start date for processing. Have to provide end as well. glob_pattern_raw is still 
+            needed to define extension.
         end: str or pd.Timestamp, optional
             See start.
         input_directory_structure: str, optional
@@ -87,10 +121,14 @@ class Workplanner():
                 yearly: expects subdirectories for each year, e.g. /data/2020/, /data/2021/, etc.
                 flat: expects all files in the root input directory.
         output_directory_structure: str, optional
-            Currently only None is allowed, which means that the output directory structure is the same as the input directory structure.
+            Currently only None is allowed, which means that the output directory structure is the
+              same as the input directory structure.
         file_complete_check: bool, optional
-            If True, the workplanner will check if the existing output files are complete by looking for a day_complete attribute in the file. 
-            If the attribute is False, the file will be re-processed. If the first complete file is found, the attribute will no longer be checked for older files, as they are assumed to be complete as well. 
+            If True, the workplanner will check if the existing output files are complete by 
+            looking for a day_complete attribute in the file. 
+            If the attribute is False, the file will be re-processed. If the first complete file is
+              found, the attribute will no longer be checked for older files, as they are assumed 
+              to be complete as well. 
         glob_pattern : str, optional
             A glob pattern to match input files. Default is '*.nc'.
 
@@ -154,8 +192,14 @@ class Workplanner():
             if output_directory_structure == 'yearly':
                 self.p2fld_out = self.p2fld_out / '{year}'
 
-        self.date_from_name = date_from_name
-        self.glob_pattern_in = glob_pattern_in
+        # self.date_from_name = date_from_name
+        if 'date_from_name' in kwargs:
+            raise DeprecationError('date_from_name', alt = 'file_name_format')
+            # self.date_from_name = kwargs['date_from_name']
+        self.file_name_format = file_name_format
+        if 'glob_pattern_in' in kwargs:
+            raise DeprecationError('glob_pattern_in', alt = 'file_name_format')
+            # self.glob_pattern_in = glob_pattern_in
         if isinstance(reporter, type(None)):
             self.reporter = prodlab.Reporter()
         elif isinstance(reporter, prodlab.Reporter):
@@ -164,9 +208,29 @@ class Workplanner():
             raise TypeError(f'reporter must be a prodlab.Reporter or None, got {type(reporter)}')
         self.verbose = verbose
 
-        self._processing_start = start
-        self._processing_end = end
-
+        assert(sum([start is not None, end is not None, days is not None]) > 0), 'At least one of the arguments start, end, and days must be set.'
+        if (start is None and end is None):
+            assert(not isinstance(days, type(None))), 'If start and end are None, days must be set.'
+            self._processing_start = pd.Timestamp.now() - pd.to_timedelta(days, 'D')
+            self._processing_end =pd.Timestamp.now()
+        elif (end is None) & (days is None):
+            assert(not isinstance(start, type(None))), 'If end and days are None, start must be set.'
+            self._processing_start = start
+            self._processing_end = pd.Timestamp.now()
+        elif days is None:
+            assert(not isinstance(start, type(None)) and not isinstance(end, type(None))), 'If days is None, start and end must be set.'
+            self._processing_start = start
+            self._processing_end = end
+        elif start is None:
+            assert(not isinstance(end, type(None)) and not isinstance(days, type(None))), 'This should not be possible!'
+            self._processing_start = end - pd.to_timedelta(days, 'D')
+            self._processing_end =end
+        elif end is None:
+            assert(not isinstance(start, type(None)) and not isinstance(days, type(None))), 'This should not be possible!'
+            self._processing_start = start
+            self._processing_end = start + pd.to_timedelta(days, 'D')
+        else:
+            raise ValueError('This should not be possible!')
         self._masterplan = None   
 
     def _read_database(self):
@@ -206,10 +270,12 @@ class Workplanner():
             start = pd.to_datetime(self._processing_start)
             end = pd.to_datetime(self._processing_end) if not isinstance(self._processing_end, type(None)) else pd.Timestamp.now()
             if self.verbose:
-                print(f'Get all files in {self.p2fld_in} with "files_between" function and start: {start}, end: {end} and glob pattern: {self.glob_pattern_in}')
-            gen = files_between(self.p2fld_in, start, end, globpattern = self.glob_pattern_in, input_directory_structure = self.input_directory_structure)
-        df  = pd.DataFrame(gen, columns=['p2f_in'])
-        return df
+                print(f'Get all files in {self.p2fld_in} with "files_between" function and start: {start}, end: {end} and file_name_format: {self.file_name_format}')
+            gen = files_between(self.p2fld_in, start, end, globpattern = self.file_name_format, input_directory_structure = self.input_directory_structure, verbose = self.verbose)
+        # df  = pd.DataFrame(gen, columns=['p2f_in'])
+        # self.tp_df1 = df.copy()
+        
+        return gen
 
     def _make_master(self):
             if self.p2fld_in is None:
@@ -219,8 +285,9 @@ class Workplanner():
                     freq='D',
                 ))
             else:
-                df1 = self._get_input_files()
-                df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
+                gen = self._get_input_files()
+                df1 = pd.DataFrame(gen, columns=['datetime', 'p2f_in']).set_index('datetime')
+                # df1.index = df1.apply(lambda row: pd.to_datetime(self.date_from_name(row.p2f_in.name)), axis = 1)
                 df1.sort_index(inplace=True)
             mp = df1      
             if self.p2fld_out is not None:          
@@ -244,6 +311,19 @@ class Workplanner():
             else:
                 raise ValueError('Either p2fld_out or database must be set.')    
             assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
+            if mp.shape[0] == 0:
+                if self.verbose:
+                    print(('---\n'
+                           'Warning: Masterplan is empty. Check:\n'
+                           '\t1. Nothing, You might just be done and no processing is needed.\n'
+                           '\t2. Is the filesystem mounted?\n'
+                           '\t3. Is the "file_name_format" argument correct. E.g.\n'
+                           '\t\ta) is the date given in julian dyas ("*{date:%Y%j}*")?\n'
+                           '\t\tb) is the date given in without millenum and century (millenium bug) ("*{date:%y%j}*")?\n'
+                           '\t\tc) or does the date uses hyphen ("*{date:%Y-%m-%d}*")?\n'
+                           'Trouble shooting:\n' 
+                           '\t1. pathlib.Path(InPutFolder).glob(file_name_format.format(date = pd.to_datetime("2026-01-01")))'
+                           ))
             self._masterplan = mp
             return mp
 
