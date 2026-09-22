@@ -41,16 +41,16 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp,
     assert('{date:' in globpattern), f"globpattern ({globpattern}) has to define how timestamps (dates) are formated in the filename. E.g. '*{{date:%Y%m%d}}*' "
     assert(end > start), f'End must come after start! (end: {end}, start{start})'
     root = root
-    d = start
-    while d <= end:
+    day = pd.to_datetime(start.date())
+    while day <= end:
         if input_directory_structure == 'yearly':
-            year_dir = root / f"{d.year}"
+            year_dir = root / f"{day.year}"
         else:
             year_dir = root
         assert(year_dir.exists()), f'The directory {year_dir} does not exists, be more carefull with you start, end, day arguments.'
         # yield from year_dir.glob(globpattern.format(date = d))
-        yield from ((d, path) for path in year_dir.glob(globpattern.format(date = d)))
-        d += pd.to_timedelta(1, 'D')
+        yield from ((day, path) for path in year_dir.glob(globpattern.format(date = day)))
+        day += pd.to_timedelta(1, 'D')
 
 class Workplanner():
     def __init__(self,
@@ -165,7 +165,7 @@ class Workplanner():
 
         if p2fld_in is None:
             if start is None or end is None:
-                raise ValueError('start and end must be set when p2fld_in is None.')
+                raise ValueError('start and end must be set when p2fld_in is None. Normally dates and therefore output file names are created based on the input file names. When the product does not depend on input files a date-range is set based on start and end dates.')
             self.p2fld_in = None
         else:
             p2fld_in = p2fld_in.format(**kwargs)
