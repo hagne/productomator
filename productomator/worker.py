@@ -21,7 +21,9 @@ class DeprecationError(Exception):
 
 def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, 
                   globpattern: str = "", 
-                  input_directory_structure: str = "yearly", verbose = False):
+                  input_directory_structure: str = "yearly", 
+                  verbose = True,
+                  ):
     """ Generator that yields all files between start and end dates (inclusive) in the given root directory.
     Parameters
     ----------
@@ -47,7 +49,9 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp,
             year_dir = root / f"{day.year}"
         else:
             year_dir = root
-        assert(year_dir.exists()), f'The directory {year_dir} does not exists, be more carefull with you start, end, day arguments.'
+        if not year_dir.exists():
+            if verbose:
+                print(f'The directory {year_dir} does not exists, be more carefull with you start, end, day arguments.')
         # yield from year_dir.glob(globpattern.format(date = d))
         yield from ((day, path) for path in year_dir.glob(globpattern.format(date = day)))
         day += pd.to_timedelta(1, 'D')
