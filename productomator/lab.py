@@ -233,7 +233,7 @@ class Reporter(object):
         txt = "DAGSTER_REPORTER_JSON=" + self.create_jason_string()
         return txt
         
-    def wrapup(self, print_degster_report = False):
+    def wrapup(self, print_dagster_report = False):
         """
         Sends out the last log and prints some info. Note processing results
         (clean, warning, errors) might not be the total number of process, but 
@@ -252,7 +252,7 @@ class Reporter(object):
             print(f'time finished: {endtime}')
             duration = (endtime - self.starttime) / _pd.to_timedelta(1, 'h')
             print(f'total processing time: {duration} hours')
-        if print_degster_report:
+        if print_dagster_report:
             print(self.create_dagster_report(), flush=True)
         self.log(reset_counters = False, overwrite_reporting_frequency = True)
     
