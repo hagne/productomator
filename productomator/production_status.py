@@ -6,6 +6,7 @@ Created on Tue Jan 16 16:44:40 2024
 @author: htelg
 """
 
+from math import prod
 import pathlib as pl
 import pandas as pd
 import numpy as np
@@ -62,7 +63,7 @@ def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
         except IndexError:
             print(f'{p2f.name} has no valid entry, skip')
             continue
-        df.loc[idx_last:df.index[-1],'no_data'] = df.loc[:,['error', 'success', 'warning']].max().max()/2
+        # df.loc[idx_last:df.index[-1],'no_data'] = 1 #df.loc[:,['error', 'success', 'warning']].max().max()/2
         # break
         df['timedelta'] = (pd.Timestamp.now() - df.index) / pd.to_timedelta(1,'d')
         products[p2f.name] = df
@@ -73,68 +74,95 @@ class Status(object):
         self.log = log
         self.out_of_date = out_of_date
 
-    def plot_time_delta(self):
+    def plot_time_delta(self, days = None, log=False):
         products = self.log
-        f,aa = plt.subplots(len(products), sharex= True, gridspec_kw={'hspace': 0})
-        
+
         prodlist = list(products.keys())
         prodlist.sort(key=lambda x: products[x].sort_index(ascending=False).success.replace(0, np.nan).dropna().index[0],
                       reverse=False)
+        if days is not None:
+            before = pd.Timestamp.now() - pd.to_timedelta(days, 'D')
+            products = {p : products[p].truncate(before = before) for p in products}
+            self.tp_products = products
+
+        f,aa = plt.subplots(len(products), sharex= True, gridspec_kw={'hspace': 0})
+        f.set_figheight(f.get_figheight() * len(products)/7)
+        f.set_figwidth(f.get_figwidth() * 1.5)
+
+
+
+        # set the xlimits (cuts out the margins)
+        last_entry = np.array([products[l].sort_index().iloc[-2].name for l in products]).max() #-2 because intentially add the execution time as a reference in the datasets
+        extime = [products[l].sort_index().iloc[-1].name for l in products][0]
+        xliml = (extime - last_entry)/ pd.to_timedelta(1,'D')
+        first_entry = np.array([products[l].sort_index().iloc[0].name for l in products]).min() 
+        xlimr = (extime - first_entry)/ pd.to_timedelta(1,'D')
+
+        now = pd.Timestamp.now()
         for e, prod in enumerate(prodlist):
             a = aa[e]
             df = products[prod]
-            assert(df.success.sum()>0), 'no data!!!'
             df.sort_index(ascending=False, inplace=True)
             x = df['timedelta']
             
-            a.plot(x, df.success, color = 'green', marker = '.', label = 'success')
+            g, = a.plot(x, df.success, color = 'green', marker = '.', label = 'success')
+            g.set_zorder(100)
+            g.set_markersize(4)
+
             a.plot(x, df.warning, marker = '.', label = 'warning')
-            a.plot(x, df.error, marker = '.', label = 'error')
+            g, = a.plot(x, df.error, marker = '.', label = 'error')
+            g.set_color('magenta')
+            g.set_markersize(10)
+
     
             bbox = dict(boxstyle = 'round', fc = [1,1,1,0.7])
-            # txt = f'{df.iloc[0].subprocess}\n{df.iloc[0].server}'
             txt = f"{prod.replace('.log','')}\n{df.iloc[1].server.replace('.cmdl.noaa.gov','')}"
-            a.text(0.95, 0.5, txt, transform = a.transAxes, va = 'center', ha = 'right', bbox = bbox)
-            a.plot(x, df.no_data, color = 'red', lw = 10)
+            a.text(1.01, 0.5, txt, transform = a.transAxes, va = 'center', ha = 'left', bbox = bbox)
+            y =  df[['error', 'success', 'warning']].max().max()/2
+            dfsuc = df[df.success > 0]
+            if dfsuc.shape[0] == 0:
+                xsuc = days
+            else:
+                xsuc = dfsuc.timedelta.iloc[0]
+
+            a.plot([x.values[0], xsuc],[y,y], color = 'red', lw = 10)
             g = a.get_lines()[-1]
             g.set_solid_capstyle('butt')
+
+            if log:
+                a.set_xscale('log')
             
-        # for e,a in enumerate(aa):
-            now = pd.Timestamp.now()
             if e == 0:
                 text = f'{now.hour:02d}:{now.minute:02d}'
             else:
                 text = None
             
             ty = df.loc[:,['error', 'success', 'warning']].max().max() *1.2
-            # plt_tools.markers.add_position_of_interest2axes(a, x = now, 
-            #                                                 text = text,
-            #                                                 text_pos = (now, ty),
-            #                                                 kwargs=dict(ls = '--', color = 'black'))
-            # plt_tools.markers.add_position_of_interest2axes(a, x = pd.Timestamp.now().date(), 
-            #                                                 kwargs=dict(ls = '--', color = 'black'))
             for i in [1,2,3,7,14,30, 60]: 
+                if days is not None:
+                    if i > days:
+                        continue
                 if e == 0:
                     text = f'{i}'
                 else:
                     text = None
-                # x = pd.Timestamp.now().date() - pd.to_timedelta(i,'d')
                 plt_tools.markers.add_position_of_interest2axes(a, x = i, 
                                                                 text = text, 
                                                                 text_pos=(i,ty),
+                                                                # transform = a.transAxes,
                                                                 kwargs=dict(ls = '--', color = 'black'))
-        leg = aa[-1].legend(loc = (1, 0),
+            a.set_xlim(left = xliml, right = xlimr)
+
+            #for testing
+            self.tp_df = df.copy()
+            # break
+
+        leg = aa[-1].legend(loc='upper left',
                           bbox_to_anchor=[1.01, 0],
                           )
-        # leg.set_bbox_to_anchor([0.5,0.5])
-        for a in aa:
-            a.set_xscale('log')
-            a.set_xlim(left = 0.2)
             
         a = aa[-1]
         a.set_xlabel('days')
-        # f.tight_layout()
-        # f.autofmt_xdate()
         return f,aa,leg#, tp_t
     
     def plot_time(self):
