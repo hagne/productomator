@@ -1,4 +1,5 @@
 import pathlib as pl
+import warnings
 import socket
 import sqlite3
 import pandas as pd
@@ -213,6 +214,12 @@ class Workplanner():
         self.verbose = verbose
 
         assert(sum([start is not None, end is not None, days is not None]) > 0), 'At least one of the arguments start, end, and days must be set.'
+        # assert(sum([start is not None, end is not None, days is not None]) == 3), "Only one or two of the arguments start, end, and days can be set. All three are set."
+        if start is not None:
+            start = pd.Timestamp(start)
+        if end is not None:
+            end = pd.Timestamp(end)
+
         if (start is None and end is None):
             assert(not isinstance(days, type(None))), 'If start and end are None, days must be set.'
             self._processing_start = pd.Timestamp.now() - pd.to_timedelta(days, 'D')
@@ -221,6 +228,11 @@ class Workplanner():
             assert(not isinstance(start, type(None))), 'If end and days are None, start must be set.'
             self._processing_start = start
             self._processing_end = pd.Timestamp.now()
+        elif (start is not None) & (end is not None):
+            self._processing_start = start
+            self._processing_end = end
+            if days is not None:
+                warnings.warn('Both start and end are set, days will be ignored.')
         elif days is None:
             assert(not isinstance(start, type(None)) and not isinstance(end, type(None))), 'If days is None, start and end must be set.'
             self._processing_start = start
