@@ -52,7 +52,8 @@ def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
         df.sort_index(inplace=True)
         df = df.truncate(start, end)
         if df.shape[0] == 0:
-            print(f'{p2f.name} has no valid entrys in the last {nodays} days!!')  
+            if verbose:
+                print(f'{p2f.name} has no valid entrys in the last {nodays} days!!')  
             out_of_date.append(p2f)
             continue
         df.loc[end] = np.nan
@@ -61,7 +62,8 @@ def load_logs(path2logs = '/home/grad/htelg/.processlogs/',
         try:
             idx_last = df[df.success>0].index[-1]
         except IndexError:
-            print(f'{p2f.name} has no valid entry, skip')
+            if verbose:
+                print(f'{p2f.name} has no valid entry, skip')
             continue
         # df.loc[idx_last:df.index[-1],'no_data'] = 1 #df.loc[:,['error', 'success', 'warning']].max().max()/2
         # break
@@ -74,8 +76,13 @@ class Status(object):
         self.log = log
         self.out_of_date = out_of_date
 
-    def plot_time_delta(self, days = None, log=False):
+    def plot_time_delta(self, days = None, log=False, search = None):
         products = self.log
+
+        if search is not None:
+            # search = 'clamps3'
+            products = {l:products[l] for l in products if search in l}
+        
 
         prodlist = list(products.keys())
         prodlist.sort(key=lambda x: products[x].sort_index(ascending=False).success.replace(0, np.nan).dropna().index[0],
