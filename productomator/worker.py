@@ -5,6 +5,9 @@ import sqlite3
 import pandas as pd
 import xarray as xr
 import productomator.lab as prodlab
+import dataclasses
+
+
 
 class DeprecationError(Exception):
     def __init__(self, deprecated_arg, alt = None):
@@ -17,7 +20,16 @@ class DeprecationError(Exception):
         super().__init__(self.message)
 
 
+@dataclasses.dataclass(frozen=True)
+class SupplementalData:
+    """supplemental data specifics"""
+    name: str
+    path2folder: str|pl.Path
+    file_name_format: str
+    input_directory_structure: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'path2folder', pl.Path(self.path2folder))
 
 
 def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp, 
@@ -42,7 +54,7 @@ def files_between(root: pl.Path, start: pd.Timestamp, end: pd.Timestamp,
         Paths to files between start and end dates.
     """ 
     assert('{date:' in globpattern), f"globpattern ({globpattern}) has to define how timestamps (dates) are formated in the filename. E.g. '*{{date:%Y%m%d}}*' "
-    assert(end > start), f'End must come after start! (end: {end}, start{start})'
+    assert(end >= start), f'End must come after start! (end: {end}, start{start})'
     root = root
     day = pd.to_datetime(start.date())
     while day <= end:
@@ -61,6 +73,7 @@ class Workplanner():
     def __init__(self,
                  # data in and output folders
                  p2fld_in = None,
+                 supplemental_data = None,
                  p2fld_out = None,
                  database = None,
                 #  date_from_name = None,
@@ -84,6 +97,8 @@ class Workplanner():
             Path to the input folder containing data files to be processed. If None, a daily 
             output file will be created for the time range specified by start and end. That 
             implies that start and end can not be None.
+        p2fld_in_supplement : dict, optional
+            
         p2fld_out : str or pathlib.Path
             Path to the output folder where processed files will be saved.
         database : tuple, optional
@@ -177,6 +192,15 @@ class Workplanner():
             self.p2fld_in = pl.Path(p2fld_in)
             if not self.p2fld_in.is_dir():
                 raise ValueError(f'Input folder {self.p2fld_in} does not exist. Make sure the volume is mounted.')
+        if supplemental_data is not None:
+            if isinstance(supplemental_data, dict):
+                supplemental_data = [supplemental_data]
+            elif isinstance(supplemental_data, list):
+                pass
+            else:
+                raise TypeError(f'supplemental_data must be a dict or list of dicts, got {type(supplemental_data)}')
+            self.supplemental_data = [SupplementalData(**data) for data in supplemental_data]
+
         self.kwargs = kwargs
         for kw in kwargs:
             setattr(self, kw, kwargs[kw])
@@ -327,6 +351,19 @@ class Workplanner():
             else:
                 raise ValueError('Either p2fld_out or database must be set.')    
             assert(mp.index.is_monotonic_increasing), 'Masterplan index is not monotonic increasing, check the date parsing from the file names.'
+
+            # if self.p2fld_in_supplement is not None:
+            if self.supplemental_data is not None:
+                def get_supplemental_file(sup,row):
+                    gen = files_between(sup.path2folder, row.name, row.name, globpattern= sup.file_name_format,input_directory_structure=sup.input_directory_structure, verbose=True)
+                    fl = list(gen)
+                    assert(len(fl)<2), "Found two file, which is currently not allowed"
+                    p2f = fl[0][1]
+                    return p2f
+                for sup in self.supplemental_data:
+                    mp[f'p2f_in_{sup.name}'] = mp.apply(lambda row: get_supplemental_file(sup, row), axis= 1)
+
+
             if mp.shape[0] == 0:
                 if self.verbose:
                     print(('---\n'
