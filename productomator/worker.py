@@ -4,6 +4,7 @@ import socket
 import sqlite3
 import pandas as pd
 import xarray as xr
+import numpy as np
 import productomator.lab as prodlab
 import dataclasses
 
@@ -199,7 +200,9 @@ class Workplanner():
                 pass
             else:
                 raise TypeError(f'supplemental_data must be a dict or list of dicts, got {type(supplemental_data)}')
-            self.supplemental_data = [SupplementalData(**data) for data in supplemental_data]
+            supplemental_data = [SupplementalData(**data) for data in supplemental_data]
+        self.supplemental_data = supplemental_data
+
 
         self.kwargs = kwargs
         for kw in kwargs:
@@ -286,12 +289,21 @@ class Workplanner():
                 conn,
                 # index_col='row_timestamp',
             )
+            self.tp_dbdf = df.copy()
+            if p2f_column is None:
+                df = df[date_column]
+            else:
+                df = df[[date_column, p2f_column]]
+            df = df[~df.duplicated()]
+            self.tp_dbdf2 = df.copy()
         if len(df) == 0:
             print(f'Warning: Database {path2database} table {table_name} is empty.')
             return None
         if p2f_column == 'None':
             df['in_database'] = True
         else:
+            assert(not np.any(df[p2f_column] == 'None')), f'Database {path2database} table {table_name} has null values in the {p2f_column} column, which is currently not allowed.'
+            # assert(len(df[p2f_column].unique()) == len(df)), f'Database {path2database} table {table_name} has duplicate entries in the {p2f_column} column, which is currently not allowed.'
             df['in_database'] = df.apply(lambda row: pl.Path(row[p2f_column]).name, axis = 1)
         df.index  = df.apply(lambda row: pd.to_datetime(row[date_column]), axis = 1)
         df.sort_index(inplace=True)
@@ -343,10 +355,13 @@ class Workplanner():
                     for timestamp in mp.index
                 ]
             elif self.database is not None:
-                df = self._read_database()
-                if df is None:
+
+                if not pl.Path(self.database[0]).exists():
+                    if self.verbose:
+                        print(f'Warning: Database {self.database[0]} does not exist, the database will be created when the first output file is processed.')
                     mp['in_database'] = None
                 else:
+                    df = self._read_database()
                     mp['in_database'] = df.in_database
             else:
                 raise ValueError('Either p2fld_out or database must be set.')    
@@ -482,10 +497,27 @@ class Workplanner():
     #     return wp
 
     def open_local_day(self, row, open_p2f_in, cut_nighttime = False):
-        """opens this and the next days file if needed. Also cuts of previous and next day"""
+        """opens this and the next days file if needed. Also cuts of previous and next day
+        Parameters
+        ----------
+        row : single row of the workplan dataframe
+        open_p2f_in : function to open the input file
+        cut_nighttime : bool, whether to cut out nighttime data
+
+        Returns
+        -------
+        out : dict with the processed dataset and status
+        """
+
         # next one needed?
         out = {}
         ds = open_p2f_in(row.p2f_in)
+        if ds.datetime.shape[0] == 0:
+            if self.verbose:
+                print(f'file has no data. path2file: {row.p2f_in}')
+            out['status'] = "File has no data"
+            return out
+        assert('degree' in ds.solar_zenith_angle.units.lower()), f'solar_zenith_angle must be in degrees, it is {ds.solar_zenith_angle.units}. Feel free to add a conversion in the source code if needed.'
         sunup_start = ds.solar_zenith_angle.isel(datetime = 0) < 90 #still in the sky in beginning of file
         sunup_end = ds.solar_zenith_angle.isel(datetime = -1) < 90 #still in the sky at end of file
         # sunrising_end = ds.solar_elevation.differentiate('time').isel(time = -1) > 0 #sun is rising at the end
@@ -507,11 +539,16 @@ class Workplanner():
                 return out
             
             next_day_needed = True
-        
             dsnext = open_p2f_in(row_next.p2f_in)
-            dsnext = dsnext.sel(datetime = slice(None,dsnext.solar_zenith_angle.idxmax()))
-            dslist.append(dsnext)
-            self.tp_dsnext = dsnext.copy()
+            if dsnext.datetime.shape[0] == 0: 
+                if self.verbose:
+                    print(f'file has no data. path2file: {row_next.p2f_in}')
+            else:
+                if self.verbose:
+                    print(f'To finish day appending file with {row_next.p2f_in}')
+                dsnext = dsnext.sel(datetime = slice(None,dsnext.solar_zenith_angle.idxmax()))
+                dslist.append(dsnext)
+                self.tp_dsnext = dsnext.copy()
         
         ds_wholeday = xr.concat(dslist, dim = 'datetime')
         if cut_nighttime:
@@ -551,6 +588,8 @@ class Workplanner():
         #####
         # get last processed instance - usefull if processing depends on the previous day
         ######
+        out_ld = self.open_local_day(row,lambda x: xr.open_dataset(x), cut_nighttime=True) # this will make sure you have a full local day, it will open the next day if needed to finish the current day
+        ds = out_ld['dataset']
         lastrow = self.get_last_row_before_workplan()
         if isinstance(lastrow, type(None)):
             assert(False), 'set defaults?'
@@ -594,7 +633,7 @@ class Workplanner():
         return ds
 
     
-    def process(self, raise_errors = False):
+    def process(self, raise_errors = False,):
         si = None
         for idx, row in self.workplan.iterrows():
             try:
