@@ -291,7 +291,7 @@ class Workplanner():
             )
             self.tp_dbdf = df.copy()
             if p2f_column is None:
-                df = df[date_column]
+                df = df[[date_column]]
             else:
                 df = df[[date_column, p2f_column]]
             df = df[~df.duplicated()]
@@ -299,12 +299,13 @@ class Workplanner():
         if len(df) == 0:
             print(f'Warning: Database {path2database} table {table_name} is empty.')
             return None
-        if p2f_column == 'None':
+        if p2f_column is None:
             df['in_database'] = True
         else:
             assert(not np.any(df[p2f_column] == 'None')), f'Database {path2database} table {table_name} has null values in the {p2f_column} column, which is currently not allowed.'
             # assert(len(df[p2f_column].unique()) == len(df)), f'Database {path2database} table {table_name} has duplicate entries in the {p2f_column} column, which is currently not allowed.'
             df['in_database'] = df.apply(lambda row: pl.Path(row[p2f_column]).name, axis = 1)
+        self.tp_df = df.copy()
         df.index  = df.apply(lambda row: pd.to_datetime(row[date_column]), axis = 1)
         df.sort_index(inplace=True)
         return df
@@ -465,7 +466,7 @@ class Workplanner():
         elif self.database is not None:
             mp = self.masterplan 
             path2database, table_name, date_column, p2f_column = self.database
-            if p2f_column == 'None':
+            if p2f_column is None:
                 in_db = ~self.masterplan.in_database.isna()
             else:
                 in_db = mp.apply(lambda row: row.p2f_in.name == row.in_database, axis = 1)
